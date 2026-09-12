@@ -22,10 +22,22 @@ export interface AuthUser {
     id: string;
     email: string;
     fullName: string;
-    role: 'Owner' | 'Admin' | 'Manager' | 'Employee';
+    phone?: string | null;
+    role: string;
     orgId: string | null;
-    organization: OrganizationSummary | null;
-    positions: PositionSummary[];
+    organization: {
+        id: string;
+        name: string;
+        timezone: string;
+        createdAt: string;
+    } | null;
+    permissions: string[];
+    positions: Array<{
+        id: string;
+        name: string;
+        hourlyRate?: number | null;
+        isLeadership?: boolean;
+    }>;
 }
 
 export interface LoginResponse {
@@ -116,10 +128,15 @@ export interface Employee {
 }
 
 export interface CreateEmployeeDto {
+    orgId: string;
     fullName: string;
     email: string;
     password?: string;
     role?: string;
+    roleName?: string;
+    phone?: string;
+    scopeId?: string;
+    scopeType?: 'organization' | 'location';
     positionIds?: string[];
 }
 
@@ -135,4 +152,75 @@ export interface CreatePositionPayload {
     name: string;
     hourlyRate?: number;
     isLeadership?: boolean;
+}
+export interface UpdatePositionDto {
+    name?: string;
+    hourlyRate?: number;
+}
+
+export interface CreateRoleDto {
+    orgId: string;
+    name: string;
+    permissionIds?: number[];
+}
+
+export interface UpdateRoleDto {
+    orgId?: string;
+    name?: string;
+    permissionIds?: number[];
+}
+
+export interface RoleResponse {
+    id: string;
+    orgId: string;
+    name: string;
+    isSystemRole: boolean;
+    userCount?: number;
+    permissions: Array<{
+        id: number;
+        key: string;
+    }>;
+}
+
+export interface PermissionItem {
+    id: number;
+    key: string;
+}
+
+export interface RoleAuditUser {
+    id: string;
+    fullName: string;
+    email: string;
+}
+
+export interface RoleWithPermissions {
+    id: string;
+    orgId: string;
+    name: string;
+    isSystemRole: boolean;
+    userCount: number;
+    lastUpdatedBy?: RoleAuditUser | null;
+    permissions: PermissionItem[];
+}
+
+export interface CreateRolePayload {
+    name: string;
+    permissionIds?: number[];
+}
+
+export interface UpdateRolePayload {
+    name?: string;
+    permissionIds?: number[];
+}
+
+export interface UpdateEmployeeProfilePayload {
+    fullName?: string;
+    phone?: string | null;
+    roleName?: string;
+    scopeType?: 'organization' | 'location';
+    scopeId?: string;
+}
+
+export interface AssignPositionsPayload {
+    positionIds: string[];
 }

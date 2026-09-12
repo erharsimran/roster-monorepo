@@ -1,256 +1,124 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { AuthUser } from '@roster/types';
 import { RosterApiClient } from '@roster/api-client';
-import { Position, Employee, SetupOrgDto } from '@roster/types';
-import { Briefcase, Users, Building2, Plus, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { NAVIGATION_REGISTRY, isNavAccessible } from '@/config/navigation';
+import { TopHeader } from '@/components/navigation/TopHeader';
+import { BottomBar } from '@/components/navigation/BottomBar';
 
 const api = new RosterApiClient(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000');
 
-export default function AdminOverviewPage() {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<any>(null);
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
 
-  // Setup Org Form State
-  const [form, setForm] = useState<SetupOrgDto>({
-    organizationName: '',
-    primaryLocationName: '',
-    address: '',
-    timezone: '',
-  });
-  const [settingUp, setSettingUp] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const loadDashboardData = async () => {
+  const fetchSession = useCallback(async () => {
     try {
-      setLoading(true);
-      const userProfile = await api.getMe();
-      setProfile(userProfile);
-
-      // Verify org strictly from user profile
-      if (userProfile.orgId || userProfile.organization?.id) {
-        localStorage.setItem('orgId', userProfile.orgId || userProfile.organization.id);
-
-        const [positionsRes, employeesRes] = await Promise.all([
-            api.getPositions(userProfile.organization.id),
-            api.getEmployees(userProfile.organization.id).catch(() => []),
-        ]);
-        setPositions(positionsRes);
-        setEmployees(employeesRes);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        router.replace('/login');
+        return;
       }
-    } catch (err: any) {
-      setErrorMessage(err.response?.data?.message || 'Failed to authenticate user.');
+      api.setToken(token);
+      const profile = await api.getMe();
+      setUser(profile);
+    } catch {
+      localStorage.removeItem('token');
+      router.replace('/login');
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      api.setToken(token);
-      loadDashboardData();
-    }
-    const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    setForm((prev) => ({ ...prev, timezone: detectedTimezone }));
-  }, []);
+    fetchSession();
+  }, [fetchSession]);
 
-  const handleBootstrapOrg = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-
-    try {
-      setSettingUp(true);
-      const payload: SetupOrgDto = {
-        organizationName: form.organizationName.trim(),
-        primaryLocationName: form.primaryLocationName.trim(),
-        timezone: form.timezone || 'UTC',
-        ...(form.address?.trim() ? { address: form.address.trim() } : {}),
-      };
-
-      await api.setupOrganization(payload);
-      await loadDashboardData();
-    } catch (err: any) {
-      const rawMessage = err.response?.data?.message;
-      setErrorMessage(Array.isArray(rawMessage) ? rawMessage.join(', ') : rawMessage || 'Failed to setup org.');
-    } finally {
-      setSettingUp(false);
-    }
+  const handleSignOut = () => {
+    localStorage.clear();
+    router.replace('/login');
   };
 
   if (loading) {
-    return <div className="text-neutral-400 text-sm">Loading admin dashboard...</div>;
-  }
-
-  const hasOrganization = Boolean(profile?.orgId || profile?.organization?.id);
-
-  if (!hasOrganization) {
     return (
-      <div className="max-w-xl mx-auto py-8">
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 shadow-xl">
-          <div className="w-12 h-12 rounded-xl bg-emerald-950/60 border border-emerald-800/80 flex items-center justify-center text-emerald-400 mb-6">
-            <Building2 className="w-6 h-6" />
-          </div>
-
-          <h2 className="text-xl font-bold tracking-tight">Create your Organization</h2>
-          <p className="text-sm text-neutral-400 mt-1">
-            Configure your company workspace and default branch location.
-          </p>
-
-          {errorMessage && (
-            <div className="mt-4 p-3 bg-rose-950/40 border border-rose-800/80 rounded-lg text-rose-300 text-xs">
-              {errorMessage}
-            </div>
-          )}
-
-          <form onSubmit={handleBootstrapOrg} className="mt-6 space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1">
-                Organization Name <span className="text-rose-400">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                maxLength={100}
-                value={form.organizationName}
-                onChange={(e) => setForm({ ...form, organizationName: e.target.value })}
-                placeholder="Apex Logistics Inc."
-                className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1">
-                Primary Branch Name <span className="text-rose-400">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                maxLength={100}
-                value={form.primaryLocationName}
-                onChange={(e) => setForm({ ...form, primaryLocationName: e.target.value })}
-                placeholder="Main Distribution Hub"
-                className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={settingUp}
-              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium rounded-lg text-sm transition-colors mt-2"
-            >
-              {settingUp ? 'Bootstrapping workspace...' : 'Bootstrap Organization'}
-            </button>
-          </form>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-400 text-xs">
+        Authenticating enterprise session...
       </div>
     );
   }
 
+  if (!user) return null;
+
+  // Filter sidebar navigation items through RPA
+  const accessibleNavItems = NAVIGATION_REGISTRY.filter((item) =>
+    isNavAccessible(item, user.permissions || [], user.role),
+  );
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Admin Console</h1>
-        <p className="text-sm text-neutral-400 mt-1">
-          Workspace for <span className="text-neutral-200 font-medium">{profile.organization?.name || 'Your Company'}</span>
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/60 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs font-medium uppercase tracking-wider text-neutral-400">Configured Roles</span>
-              <p className="text-3xl font-bold mt-2">{positions.length}</p>
-            </div>
-            <div className="p-3 bg-neutral-800 text-emerald-400 rounded-xl">
-              <Briefcase className="w-6 h-6" />
-            </div>
+    <div className="min-h-screen flex bg-neutral-950 text-neutral-100 antialiased">
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex w-60 border-r border-neutral-800 bg-neutral-900/40 flex-col shrink-0 sticky top-0 h-screen">
+        <div className="h-16 flex items-center gap-3 px-6 border-b border-neutral-800">
+          <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center font-bold text-white text-sm shadow-md shadow-emerald-900/40">
+            R
           </div>
-          <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between">
-            <Link
-              href="/dashboard/positions"
-              className="text-xs text-neutral-300 hover:text-emerald-400 font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <span>Manage positions</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+          <div>
+            <span className="font-semibold tracking-tight text-sm block">Roster</span>
+            <span className="text-[10px] text-neutral-400 uppercase tracking-wider font-mono">
+              Enterprise
+            </span>
           </div>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/60 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs font-medium uppercase tracking-wider text-neutral-400">Total Staff</span>
-              <p className="text-3xl font-bold mt-2">{employees.length}</p>
-            </div>
-            <div className="p-3 bg-neutral-800 text-sky-400 rounded-xl">
-              <Users className="w-6 h-6" />
-            </div>
+        {/* Dynamic RPA Nav Items */}
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          <div className="px-3 pb-2 text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">
+            Navigation
           </div>
-          <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between">
-            <Link
-              href="/dashboard/employees"
-              className="text-xs text-neutral-300 hover:text-sky-400 font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <span>Manage directory</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        </div>
+          {accessibleNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive =
+              pathname === item.href ||
+              (item.href !== '/dashboard' && pathname.startsWith(item.href));
+
+            return (
+              <Link
+                key={item.title}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  isActive
+                    ? 'bg-neutral-800 text-emerald-400 border border-neutral-700/60 shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                <span>{item.title}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* Main Viewport Shell */}
+      <div className="flex-1 flex flex-col min-w-0 pb-16 md:pb-0">
+        <TopHeader user={user} onSignOut={handleSignOut} />
+        <main className="flex-1 p-4 md:p-8 overflow-y-auto">{children}</main>
       </div>
 
-      <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/40">
-        <h2 className="text-base font-semibold">Deployment Checklist</h2>
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-neutral-900 border border-neutral-800">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-              <div>
-                <p className="text-sm font-medium">Organization Created</p>
-                <p className="text-xs text-neutral-400">{profile.organization?.name || 'Completed'}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-3 rounded-lg bg-neutral-900 border border-neutral-800">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className={`w-5 h-5 ${positions.length > 0 ? 'text-emerald-500' : 'text-neutral-600'}`} />
-              <div>
-                <p className="text-sm font-medium">Define Positions & Pay Rates</p>
-                <p className="text-xs text-neutral-400">{positions.length} configured</p>
-              </div>
-            </div>
-            <Link
-              href="/dashboard/positions"
-              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Position</span>
-            </Link>
-          </div>
-
-          <div className="flex items-center justify-between p-3 rounded-lg bg-neutral-900 border border-neutral-800">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className={`w-5 h-5 ${employees.length > 0 ? 'text-emerald-500' : 'text-neutral-600'}`} />
-              <div>
-                <p className="text-sm font-medium">Onboard Employees</p>
-                <p className="text-xs text-neutral-400">{employees.length} team members</p>
-              </div>
-            </div>
-            <Link
-              href="/dashboard/employees"
-              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Onboard Staff</span>
-            </Link>
-          </div>
-        </div>
-      </div>
+      {/* Mobile Bottom Navigation Bar */}
+      <BottomBar
+        userPermissions={user.permissions || []}
+        userRole={user.role}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { RosterApiClient } from '@roster/api-client';
-import { Briefcase, Plus, Trash2, ShieldCheck, DollarSign, AlertCircle } from 'lucide-react';
+import { Briefcase, Plus, Trash2, Pencil, ShieldCheck, DollarSign, AlertCircle } from 'lucide-react';
 
 const api = new RosterApiClient(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000');
 
@@ -21,8 +21,9 @@ export default function PositionsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Form Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // Modal State
+  const [modalMode, setModalMode] = useState<'create' | 'edit' | null>(null);
+  const [activePosition, setActivePosition] = useState<PositionItem | null>(null);
   const [name, setName] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [isLeadership, setIsLeadership] = useState(false);
@@ -55,29 +56,62 @@ export default function PositionsPage() {
     }
   }, [loadData]);
 
-  const handleCreatePosition = async (e: React.FormEvent) => {
+  const openCreateModal = () => {
+    setName('');
+    setHourlyRate('');
+    setIsLeadership(false);
+    setActivePosition(null);
+    setModalMode('create');
+    setErrorMessage(null);
+  };
+
+  const openEditModal = (pos: PositionItem) => {
+    setName(pos.name);
+    setHourlyRate(pos.hourlyRate ? String(pos.hourlyRate) : '');
+    setIsLeadership(Boolean(pos.isLeadership));
+    setActivePosition(pos);
+    setModalMode('edit');
+    setErrorMessage(null);
+  };
+
+  const closeModal = () => {
+    setModalMode(null);
+    setActivePosition(null);
+    setName('');
+    setHourlyRate('');
+    setIsLeadership(false);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!orgId || !name.trim()) return;
+    if (!name.trim()) return;
 
     try {
       setSubmitting(true);
       setErrorMessage(null);
 
-      await api.createPosition({
-        orgId,
-        name: name.trim(),
-        hourlyRate: hourlyRate ? parseFloat(hourlyRate) : undefined,
-        isLeadership,
-      });
+      const parsedRate = hourlyRate.trim() ? parseFloat(hourlyRate) : undefined;
 
-      setName('');
-      setHourlyRate('');
-      setIsLeadership(false);
-      setIsModalOpen(false);
+      if (modalMode === 'create') {
+        if (!orgId) throw new Error('No organization context detected.');
+        await api.createPosition({
+          orgId,
+          name: name.trim(),
+          hourlyRate: parsedRate,
+          isLeadership,
+        });
+      } else if (modalMode === 'edit' && activePosition) {
+        await api.updatePosition(activePosition.id, {
+          name: name.trim(),
+          hourlyRate: parsedRate,
+        });
+      }
+
+      closeModal();
       await loadData();
     } catch (err: any) {
       const msg = err.response?.data?.message;
-      setErrorMessage(Array.isArray(msg) ? msg.join(', ') : msg || 'Failed to create position.');
+      setErrorMessage(Array.isArray(msg) ? msg.join(', ') : msg || 'Failed to save position.');
     } finally {
       setSubmitting(false);
     }
@@ -87,10 +121,18 @@ export default function PositionsPage() {
     if (!confirm('Are you sure you want to delete this position?')) return;
 
     try {
+      setErrorMessage(null);
       await api.deletePosition(id);
       setPositions((prev) => prev.filter((p) => p.id !== id));
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Cannot delete position with active shifts.');
+      const status = err.response?.status;
+      const msg = err.response?.data?.message;
+
+      if (status === 409) {
+        setErrorMessage(msg || 'Cannot delete: active shifts or employee assignments depend on this position.');
+      } else {
+        setErrorMessage(msg || 'Failed to delete position.');
+      }
     }
   };
 
@@ -100,16 +142,16 @@ export default function PositionsPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      {/* Header */}
+      {/* Top Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Job Positions</h1>
           <p className="text-sm text-neutral-400 mt-0.5">
-            Define organizational roles, default wage rates, and leadership tiers.
+            Configure workplace roles, default wage baselines, and leadership permissions.
           </p>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCreateModal}
           className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -118,9 +160,17 @@ export default function PositionsPage() {
       </div>
 
       {errorMessage && (
-        <div className="p-3 bg-rose-950/40 border border-rose-800/80 rounded-lg text-rose-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{errorMessage}</span>
+        <div className="p-3 bg-rose-950/40 border border-rose-800/80 rounded-lg text-rose-300 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => setErrorMessage(null)}
+            className="text-rose-400 hover:text-rose-200 text-xs font-semibold"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -139,7 +189,7 @@ export default function PositionsPage() {
             {positions.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-6 py-8 text-center text-neutral-500 text-xs">
-                  No positions created yet. Click &quot;Add Position&quot; to configure your first job role.
+                  No positions created yet. Click &quot;Add Position&quot; to establish your job catalog.
                 </td>
               </tr>
             ) : (
@@ -165,13 +215,22 @@ export default function PositionsPage() {
                     )}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => handleDeletePosition(pos.id)}
-                      className="p-1.5 text-neutral-400 hover:text-rose-400 hover:bg-neutral-800 rounded-md transition-colors"
-                      title="Delete Position"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => openEditModal(pos)}
+                        className="p-1.5 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 rounded-md transition-colors"
+                        title="Edit Position"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeletePosition(pos.id)}
+                        className="p-1.5 text-neutral-400 hover:text-rose-400 hover:bg-neutral-800 rounded-md transition-colors"
+                        title="Delete Position"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -180,18 +239,22 @@ export default function PositionsPage() {
         </table>
       </div>
 
-      {/* Create Position Modal */}
-      {isModalOpen && (
+      {/* Create / Edit Modal */}
+      {modalMode && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
             <div>
-              <h2 className="text-lg font-bold">Add New Position</h2>
+              <h2 className="text-lg font-bold">
+                {modalMode === 'create' ? 'Add New Position' : `Edit: ${activePosition?.name}`}
+              </h2>
               <p className="text-xs text-neutral-400 mt-0.5">
-                Set operational requirements and default pay tier.
+                {modalMode === 'create'
+                  ? 'Define position requirements and default compensation.'
+                  : 'Update position label and default hourly wage.'}
               </p>
             </div>
 
-            <form onSubmit={handleCreatePosition} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-neutral-300 mb-1">
                   Position Title <span className="text-rose-400">*</span>
@@ -201,7 +264,7 @@ export default function PositionsPage() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Line Cook, Cashier, Supervisor"
+                  placeholder="e.g. Line Cook, Barista, Floor Supervisor"
                   className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -224,23 +287,25 @@ export default function PositionsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 pt-1">
-                <input
-                  type="checkbox"
-                  id="leadership"
-                  checked={isLeadership}
-                  onChange={(e) => setIsLeadership(e.target.checked)}
-                  className="w-4 h-4 rounded border-neutral-700 bg-neutral-800 text-emerald-600 focus:ring-0 focus:ring-offset-0"
-                />
-                <label htmlFor="leadership" className="text-xs text-neutral-300 select-none cursor-pointer">
-                  Designate as Leadership position (can satisfy leadership-on-duty rules)
-                </label>
-              </div>
+              {modalMode === 'create' && (
+                <div className="flex items-center gap-3 pt-1">
+                  <input
+                    type="checkbox"
+                    id="leadership"
+                    checked={isLeadership}
+                    onChange={(e) => setIsLeadership(e.target.checked)}
+                    className="w-4 h-4 rounded border-neutral-700 bg-neutral-800 text-emerald-600 focus:ring-0"
+                  />
+                  <label htmlFor="leadership" className="text-xs text-neutral-300 select-none cursor-pointer">
+                    Designate as Leadership position
+                  </label>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-800">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeModal}
                   className="px-4 py-2 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition-colors"
                 >
                   Cancel
@@ -250,7 +315,7 @@ export default function PositionsPage() {
                   disabled={submitting}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
                 >
-                  {submitting ? 'Saving...' : 'Save Position'}
+                  {submitting ? 'Saving...' : modalMode === 'create' ? 'Create Position' : 'Save Changes'}
                 </button>
               </div>
             </form>
